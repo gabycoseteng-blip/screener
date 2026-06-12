@@ -81,9 +81,10 @@ Plus `seen_posts` (dedup/state) and `runs` (per-run observability).
 ## Environment variables
 
 See `.env.example`. Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`,
-`REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `FMP_API_KEY`,
-`CRON_SECRET`. Optional: `DASHBOARD_PASSWORD`, `SLACK_WEBHOOK_URL`,
-`TRIAGE_MODEL`, `SCORING_MODEL`, `NOTION_*`.
+`FMP_API_KEY`, `CRON_SECRET`. Optional: `REDDIT_CLIENT_ID`,
+`REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT` (public-JSON fallback used when
+unset), `DASHBOARD_PASSWORD`, `SLACK_WEBHOOK_URL`, `TRIAGE_MODEL`,
+`SCORING_MODEL`, `NOTION_*`.
 
 - **`DASHBOARD_PASSWORD`** gates the review dashboard and its read APIs
   (`/api/ideas`, `/api/runs`). If unset it falls back to `CRON_SECRET`, so the
@@ -93,6 +94,11 @@ See `.env.example`. Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`,
 - **Reddit** keys: create a *script* app at <https://www.reddit.com/prefs/apps>.
   The pipeline uses read-only application-only OAuth (no user login). Set a
   descriptive, unique `REDDIT_USER_AGENT` or Reddit will 429/403 you.
+  **No keys yet?** Reddit's Responsible Builder Policy (2026) gates new keys
+  behind an approval process. Until approved, leave `REDDIT_CLIENT_ID/SECRET`
+  unset and the pipeline automatically reads the public `/r/<sub>/top.json`
+  endpoints instead (stopgap: tighter rate limits, and datacenter IPs are
+  occasionally blocked).
 - **FMP** key: <https://site.financialmodelingprep.com/> (free tier validates
   tickers and sectors; EOD prices may need a paid tier).
 
