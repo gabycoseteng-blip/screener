@@ -113,10 +113,16 @@
       }
 
       // --- gate ---------------------------------------------------------------
-      function showGate(error) {
+      function showGate(message) {
         $("app").classList.add("hidden");
         $("gate").classList.remove("hidden");
-        $("gate-error").classList.toggle("hidden", !error);
+        const err = $("gate-error");
+        if (message) {
+          err.textContent = message;
+          err.classList.remove("hidden");
+        } else {
+          err.classList.add("hidden");
+        }
       }
       function showApp() {
         $("gate").classList.add("hidden");
@@ -130,8 +136,12 @@
           localStorage.setItem(KEY_STORAGE, key);
           showApp();
           load();
-        } catch {
-          showGate(true);
+        } catch (err) {
+          showGate(
+            err.message === "unauthorized"
+              ? "Incorrect key."
+              : "Server error — the API isn't reachable. Check that the project's environment variables (DATABASE_URL, etc.) are set in Vercel and redeploy.",
+          );
         }
       });
       $("logout-btn").addEventListener("click", () => {
@@ -244,7 +254,7 @@
             });
           });
         } catch (err) {
-          if (err.message === "unauthorized") return showGate(true);
+          if (err.message === "unauthorized") return showGate("Session expired — please sign in again.");
           alert("Failed to load: " + err.message);
         }
       }
