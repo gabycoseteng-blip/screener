@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en" class="h-full">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Equity Idea Aggregator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      [v-cloak] { display: none; }
+      body { font-feature-settings: "tnum"; }
+    </style>
+  </head>
+  <body class="h-full bg-slate-50 text-slate-800">
+    <!-- Login gate -->
+    <div id="gate" class="hidden fixed inset-0 z-50 grid place-items-center bg-slate-100">
+      <form id="gate-form" class="w-80 rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+        <h1 class="mb-1 text-lg font-semibold">Equity Idea Aggregator</h1>
+        <p class="mb-4 text-sm text-slate-500">Enter the access key to view ideas.</p>
+        <input id="gate-key" type="password" autocomplete="current-password" placeholder="Access key"
+          class="mb-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-slate-500 focus:outline-none" />
+        <p id="gate-error" class="mb-3 hidden text-sm text-red-600">Incorrect key.</p>
+        <button class="w-full rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">Enter</button>
+      </form>
+    </div>
+
+    <main id="app" class="hidden mx-auto max-w-7xl px-4 py-6">
+      <!-- Header -->
+      <header class="mb-6 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 class="text-xl font-semibold tracking-tight">Equity Idea Aggregator</h1>
+          <p class="text-sm text-slate-500">Scored equity theses pulled from social sources for human review.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="run-btn" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-100">Run pipeline now</button>
+          <button id="refresh-btn" class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-700">Refresh</button>
+          <button id="logout-btn" class="text-sm text-slate-400 hover:text-slate-600">Sign out</button>
+        </div>
+      </header>
+
+      <!-- Health / stats -->
+      <section id="stats" class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6"></section>
+
+      <!-- Filters -->
+      <section class="mb-4 flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-3">
+        <label class="text-xs font-medium text-slate-500">Status
+          <select id="f-status" class="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="">All</option>
+            <option>New</option>
+            <option>Reviewed</option>
+            <option>In Diligence</option>
+            <option>Rejected</option>
+          </select>
+        </label>
+        <label class="text-xs font-medium text-slate-500">Min score
+          <input id="f-minscore" type="number" min="0" max="100" step="1" placeholder="0"
+            class="mt-1 block w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+        <label class="text-xs font-medium text-slate-500">Sort
+          <select id="f-sort" class="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
+            <option value="score">Score (high → low)</option>
+            <option value="score_asc">Score (low → high)</option>
+            <option value="date">Newest</option>
+          </select>
+        </label>
+        <label class="flex-1 text-xs font-medium text-slate-500">Search
+          <input id="f-q" type="search" placeholder="Ticker, title, or thesis…"
+            class="mt-1 block w-full rounded-lg border border-slate-300 px-2 py-1.5 text-sm" />
+        </label>
+      </section>
+
+      <!-- Ideas table -->
+      <section class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+              <tr>
+                <th class="px-3 py-2">Score</th>
+                <th class="px-3 py-2">Ticker</th>
+                <th class="px-3 py-2">Dir</th>
+                <th class="px-3 py-2">Sector</th>
+                <th class="px-3 py-2">Thesis</th>
+                <th class="px-3 py-2">Fwd ret</th>
+                <th class="px-3 py-2">Found</th>
+                <th class="px-3 py-2">Source</th>
+                <th class="px-3 py-2">Status</th>
+              </tr>
+            </thead>
+            <tbody id="rows" class="divide-y divide-slate-100"></tbody>
+          </table>
+        </div>
+        <div id="empty" class="hidden p-8 text-center text-sm text-slate-400">No ideas match these filters yet.</div>
+        <div id="count" class="border-t border-slate-100 px-3 py-2 text-xs text-slate-400"></div>
+      </section>
+    </main>
+
+    <script>
+      const KEY_STORAGE = "eia_key";
+      const STATUSES = ["New", "Reviewed", "In Diligence", "Rejected"];
+      let key = localStorage.getItem(KEY_STORAGE) || "";
+
+      const $ = (id) => document.getElementById(id);
+      const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+      async function api(path, opts = {}) {
+        const res = await fetch(path, {
+          ...opts,
+          headers: { "x-dashboard-key": key, "content-type": "application/json", ...(opts.headers || {}) },
+        });
+        if (res.status === 401) throw new Error("unauthorized");
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);
+        return res.json();
+      }
+
+      // --- gate ---------------------------------------------------------------
+      function showGate(error) {
+        $("app").classList.add("hidden");
+        $("gate").classList.remove("hidden");
+        $("gate-error").classList.toggle("hidden", !error);
+      }
+      function showApp() {
+        $("gate").classList.add("hidden");
+        $("app").classList.remove("hidden");
+      }
+      $("gate-form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        key = $("gate-key").value.trim();
+        try {
+          await api("/api/runs?limit=1");
+          localStorage.setItem(KEY_STORAGE, key);
+          showApp();
+          load();
+        } catch {
+          showGate(true);
+        }
+      });
+      $("logout-btn").addEventListener("click", () => {
+        localStorage.removeItem(KEY_STORAGE);
+        key = "";
+        showGate(false);
+      });
+
+      // --- rendering ----------------------------------------------------------
+      function scoreBadge(s) {
+        if (s == null) return '<span class="text-slate-300">—</span>';
+        const v = Math.round(s);
+        const color = v >= 80 ? "bg-emerald-100 text-emerald-700" : v >= 60 ? "bg-amber-100 text-amber-700" : "bg-slate-100 text-slate-600";
+        return `<span class="inline-block rounded px-2 py-0.5 text-xs font-semibold ${color}">${v}</span>`;
+      }
+      function dirBadge(d) {
+        const map = { long: "bg-emerald-50 text-emerald-700", short: "bg-red-50 text-red-700" };
+        const cls = map[d] || "bg-slate-100 text-slate-500";
+        return `<span class="inline-block rounded px-1.5 py-0.5 text-xs font-medium capitalize ${cls}">${esc(d || "—")}</span>`;
+      }
+      function fwd(r) {
+        if (!r || typeof r !== "object") return '<span class="text-slate-300">—</span>';
+        return Object.entries(r).map(([k, v]) => {
+          const pct = (v * 100).toFixed(1);
+          const c = v >= 0 ? "text-emerald-600" : "text-red-600";
+          return `<span class="mr-1 whitespace-nowrap text-xs ${c}" title="${esc(k)}">${esc(k)} ${v >= 0 ? "+" : ""}${pct}%</span>`;
+        }).join("");
+      }
+      function statusSelect(idea) {
+        const opts = STATUSES.map((s) => `<option ${s === idea.status ? "selected" : ""}>${s}</option>`).join("");
+        return `<select data-id="${idea.id}" class="status-select rounded border border-slate-200 bg-white px-1.5 py-1 text-xs">${opts}</select>`;
+      }
+
+      function renderIdea(idea) {
+        const ticker = idea.primaryTicker
+          ? `<span class="font-semibold">${esc(idea.primaryTicker)}</span>`
+          : '<span class="text-slate-300">—</span>';
+        const extra = (idea.allTickers || []).filter((t) => t !== idea.primaryTicker);
+        const more = extra.length ? `<span class="ml-1 text-xs text-slate-400">+${extra.map(esc).join(", ")}</span>` : "";
+        const thesis = esc(idea.aiThesisSummary || idea.postTitle || "");
+        const date = idea.dateFound ? new Date(idea.dateFound).toLocaleDateString() : "";
+        return `<tr class="align-top hover:bg-slate-50">
+          <td class="px-3 py-2">${scoreBadge(idea.aiQualityScore)}</td>
+          <td class="px-3 py-2 whitespace-nowrap">${ticker}${more}</td>
+          <td class="px-3 py-2">${dirBadge(idea.aiDirection)}</td>
+          <td class="px-3 py-2 text-xs text-slate-500">${esc(idea.sector || "—")}${idea.industry ? `<br><span class="text-slate-400">${esc(idea.industry)}</span>` : ""}</td>
+          <td class="px-3 py-2 max-w-md"><div class="line-clamp-3 text-slate-700" title="${thesis}">${thesis}</div></td>
+          <td class="px-3 py-2">${fwd(idea.fwdReturns)}</td>
+          <td class="px-3 py-2 whitespace-nowrap text-xs text-slate-500">${esc(date)}</td>
+          <td class="px-3 py-2"><a class="text-xs text-blue-600 hover:underline" href="${esc(idea.permalink)}" target="_blank" rel="noopener">${esc(idea.sourcePlatform)} ↗</a></td>
+          <td class="px-3 py-2">${statusSelect(idea)}</td>
+        </tr>`;
+      }
+
+      function statCard(label, value, sub) {
+        return `<div class="rounded-xl border border-slate-200 bg-white p-3">
+          <div class="text-xs text-slate-500">${esc(label)}</div>
+          <div class="mt-1 text-xl font-semibold">${esc(value)}</div>
+          ${sub ? `<div class="text-xs text-slate-400">${esc(sub)}</div>` : ""}
+        </div>`;
+      }
+
+      function renderStats(ideas, lastRun) {
+        const byStatus = (s) => ideas.filter((i) => i.status === s).length;
+        const cards = [
+          statCard("Ideas (shown)", ideas.length, ""),
+          statCard("New", byStatus("New"), "awaiting review"),
+          statCard("In diligence", byStatus("In Diligence"), ""),
+          statCard("Reviewed", byStatus("Reviewed"), ""),
+        ];
+        if (lastRun) {
+          cards.push(statCard("Last run", `${lastRun.written} written`, `${lastRun.pulled} pulled · ${new Date(lastRun.startedAt).toLocaleString()}`));
+          cards.push(statCard("Last run cost", `$${(lastRun.llmCostUsd || 0).toFixed(2)}`, lastRun.status));
+        }
+        $("stats").innerHTML = cards.join("");
+      }
+
+      // --- load ---------------------------------------------------------------
+      function filters() {
+        const p = new URLSearchParams();
+        if ($("f-status").value) p.set("status", $("f-status").value);
+        if ($("f-minscore").value) p.set("minScore", $("f-minscore").value);
+        if ($("f-q").value.trim()) p.set("q", $("f-q").value.trim());
+        p.set("sort", $("f-sort").value);
+        return p.toString();
+      }
+
+      async function load() {
+        try {
+          const [{ ideas }, runsResp] = await Promise.all([
+            api("/api/ideas?" + filters()),
+            api("/api/runs?limit=1").catch(() => ({ runs: [] })),
+          ]);
+          const rows = $("rows");
+          rows.innerHTML = ideas.map(renderIdea).join("");
+          $("empty").classList.toggle("hidden", ideas.length > 0);
+          $("count").textContent = `${ideas.length} idea${ideas.length === 1 ? "" : "s"} shown`;
+          renderStats(ideas, (runsResp.runs || [])[0]);
+          rows.querySelectorAll(".status-select").forEach((sel) => {
+            sel.addEventListener("change", async (e) => {
+              const el = e.target;
+              const prev = el.dataset.prev || el.value;
+              try {
+                await api("/api/ideas", { method: "PATCH", body: JSON.stringify({ id: Number(el.dataset.id), status: el.value }) });
+                el.dataset.prev = el.value;
+              } catch (err) {
+                el.value = prev;
+                alert("Failed to update status: " + err.message);
+              }
+            });
+          });
+        } catch (err) {
+          if (err.message === "unauthorized") return showGate(true);
+          alert("Failed to load: " + err.message);
+        }
+      }
+
+      // --- controls -----------------------------------------------------------
+      $("refresh-btn").addEventListener("click", load);
+      ["f-status", "f-minscore", "f-sort"].forEach((id) => $(id).addEventListener("change", load));
+      let qTimer;
+      $("f-q").addEventListener("input", () => { clearTimeout(qTimer); qTimer = setTimeout(load, 300); });
+      $("run-btn").addEventListener("click", async () => {
+        const btn = $("run-btn");
+        btn.disabled = true; btn.textContent = "Running…";
+        try {
+          // /api/run validates CRON_SECRET via the Authorization header.
+          await api("/api/run", { method: "POST", headers: { Authorization: `Bearer ${key}` } });
+          await load();
+        } catch (err) {
+          alert(err.message === "unauthorized"
+            ? "Run requires the CRON_SECRET. If your dashboard key differs from CRON_SECRET, trigger runs from the CLI instead."
+            : "Run failed: " + err.message);
+        } finally {
+          btn.disabled = false; btn.textContent = "Run pipeline now";
+        }
+      });
+
+      // --- boot ---------------------------------------------------------------
+      (async function boot() {
+        if (!key) return showGate(false);
+        try {
+          await api("/api/runs?limit=1");
+          showApp();
+          load();
+        } catch {
+          showGate(false);
+        }
+      })();
+    </script>
+  </body>
+</html>

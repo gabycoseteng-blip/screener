@@ -82,8 +82,13 @@ Plus `seen_posts` (dedup/state) and `runs` (per-run observability).
 
 See `.env.example`. Required: `DATABASE_URL`, `ANTHROPIC_API_KEY`,
 `REDDIT_CLIENT_ID`, `REDDIT_CLIENT_SECRET`, `REDDIT_USER_AGENT`, `FMP_API_KEY`,
-`CRON_SECRET`. Optional: `SLACK_WEBHOOK_URL`, `TRIAGE_MODEL`, `SCORING_MODEL`,
-`NOTION_*`.
+`CRON_SECRET`. Optional: `DASHBOARD_PASSWORD`, `SLACK_WEBHOOK_URL`,
+`TRIAGE_MODEL`, `SCORING_MODEL`, `NOTION_*`.
+
+- **`DASHBOARD_PASSWORD`** gates the review dashboard and its read APIs
+  (`/api/ideas`, `/api/runs`). If unset it falls back to `CRON_SECRET`, so the
+  dashboard works out of the box — set it only if you want reviewers to browse
+  without holding the secret that can trigger pipeline runs.
 
 - **Reddit** keys: create a *script* app at <https://www.reddit.com/prefs/apps>.
   The pipeline uses read-only application-only OAuth (no user login). Set a
@@ -110,6 +115,30 @@ crons in `vercel.json` fire automatically (`/api/cron` daily 11:00 UTC,
 ```bash
 curl -X POST https://<deployment>/api/run -H "Authorization: Bearer $CRON_SECRET"
 ```
+
+---
+
+## Review dashboard
+
+A self-contained dashboard is served at the deployment root (`/`) from
+`public/index.html` — no build step, just static HTML + vanilla JS calling the
+read APIs. Open the URL, enter the access key (`DASHBOARD_PASSWORD`, or
+`CRON_SECRET` if unset), and you get:
+
+- A filterable, sortable table of scored ideas (status, min score, ticker/thesis
+  search), with inline review-status editing (New / Reviewed / In Diligence /
+  Rejected).
+- Forward-return columns once the outcomes backfill has run.
+- A health row showing the latest pipeline run (pulled → written, LLM cost).
+- A **Run pipeline now** button (uses `CRON_SECRET`).
+
+Backing endpoints:
+
+| Route | Method | Purpose |
+|---|---|---|
+| `/api/ideas` | GET | list/filter ideas (`?status`, `?minScore`, `?q`, `?sort`, `?limit`) |
+| `/api/ideas` | PATCH | `{ id, status }` — update an idea's review status |
+| `/api/runs` | GET | recent pipeline runs for the health panel |
 
 ---
 
